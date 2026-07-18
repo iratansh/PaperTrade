@@ -1,0 +1,58 @@
+package com.papertrade.service;
+
+import com.papertrade.domain.TradingAccount;
+import com.papertrade.domain.User;
+import com.papertrade.repository.AccountRepository;
+import com.papertrade.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Mono;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AccountService {
+
+    private final UserRepository userRepository;
+    private final AccountRepository accountRepository;
+
+    @Value("${trading.initial-balance:100000.00}")
+    private BigDecimal initialBalance;
+
+    /**
+     * Create a new user account with initial paper trading balance
+     *
+     * @Transactional ensures both user and account are created atomically
+     */
+    @Transactional
+    public Mono<TradingAccount> createAccount(User user) {
+        log.info("Creating trading account for user: {}", user.getUsername());
+
+        return userRepository.save(user)
+            .flatMap(savedUser -> {
+                TradingAccount account = TradingAccount.builder()
+                    .accountId(UUID.randomUUID())
+                    .userId(savedUser.getUserId())
+                    .balance(initialBalance)
+                    .initialBalance(initialBalance)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+
+                return accountRepository.save(account);
+            });
+    }
+
+    /**
+     * Get account for a user
+     */
+    public Mono<TradingAccount> getAccountByUserId(UUID userId) {
+        return accountRepository.findByUserId(userId);
+    }
+}
