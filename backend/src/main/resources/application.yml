@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: papertrade
+
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:papertrade}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    pool:
+      initial-size: 10
+      max-size: 50
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+
+  security:
+    user:
+      name: admin
+      password: admin
+
+server:
+  port: 8080
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:your-256-bit-secret-key-change-this-in-production-please}
+  expiration: 86400000 # 24 hours in milliseconds
+  refresh-expiration: 604800000 # 7 days
+
+# Finnhub API
+finnhub:
+  api-key: ${FINNHUB_API_KEY:}
+  websocket-url: wss://ws.finnhub.io
+
+# Trading Configuration
+trading:
+  initial-balance: 100000.00
+  market-hours:
+    open: "09:30"
+    close: "16:00"
+    timezone: "America/New_York"
+
+# Cache Configuration
+cache:
+  market-data-ttl: 5 # seconds
+  portfolio-ttl: 10 # seconds
+
+logging:
+  level:
+    com.papertrade: DEBUG
+    org.springframework.r2dbc: DEBUG
