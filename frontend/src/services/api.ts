@@ -8,6 +8,7 @@ import type {
   Candle,
   HistoryRange,
   AuthResponse,
+  SnapshotPoint,
 } from '../types';
 
 // --- Token storage -------------------------------------------------------
@@ -112,6 +113,10 @@ export const authApi = {
 export const portfolioApi = {
   getPortfolio: async (): Promise<Portfolio> => {
     const { data } = await api.get('/portfolio');
+    return data;
+  },
+  getHistory: async (): Promise<SnapshotPoint[]> => {
+    const { data } = await api.get('/portfolio/history');
     return data;
   },
 };

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, TrendingUp } from 'lucide-react';
 import StockChart from '../components/StockChart';
 import { marketDataApi, ordersApi, portfolioApi } from '../services/api';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatPercent } from '../utils/format';
 import { useToast } from '../context/ToastContext';
 import type { StockQuote, PlaceOrderRequest, Candle, HistoryRange, Position } from '../types';
 
@@ -151,6 +151,15 @@ export default function StockDetail() {
   const estimatedTotal =
     parseFloat(quantity || '0') * (isMarketOrder ? quote.price : parseFloat(limitPrice || '0'));
 
+  // Period change over the selected range (first vs last close)
+  const periodChange =
+    candles.length >= 2 ? candles[candles.length - 1].close - candles[0].close : 0;
+  const periodChangePct =
+    candles.length >= 2 && candles[0].close !== 0
+      ? (periodChange / candles[0].close) * 100
+      : 0;
+  const periodPositive = periodChange >= 0;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -169,6 +178,12 @@ export default function StockDetail() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">{symbol?.toUpperCase()}</h1>
               <p className="text-3xl font-bold text-gray-900">{formatCurrency(quote.price)}</p>
+              {candles.length >= 2 && (
+                <p className={`text-sm font-medium mt-1 ${periodPositive ? 'text-success' : 'text-danger'}`}>
+                  {periodPositive ? '+' : '-'}{formatCurrency(Math.abs(periodChange))} ({formatPercent(periodChangePct)}){' '}
+                  <span className="text-gray-400 font-normal">{range}</span>
+                </p>
+              )}
             </div>
           </div>
 

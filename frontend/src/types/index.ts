@@ -74,3 +74,8 @@ export interface Candle {
 }
 
 export type HistoryRange = '1D' | '1W' | '3M' | '1Y' | 'YTD';
+
+export interface SnapshotPoint {
+  capturedAt: string;
+  totalValue: number;
+}

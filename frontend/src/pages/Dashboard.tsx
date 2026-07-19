@@ -4,11 +4,22 @@ import { Wallet, TrendingUp, TrendingDown, ChevronRight } from 'lucide-react';
 import PortfolioChart from '../components/PortfolioChart';
 import { portfolioApi } from '../services/api';
 import { formatCurrency, formatPercent } from '../utils/format';
-import type { Portfolio, Position } from '../types';
+import type { Portfolio, Position, SnapshotPoint } from '../types';
+
+function formatSnapshotLabel(iso: string): string {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(d);
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [history, setHistory] = useState<SnapshotPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,8 +31,12 @@ export default function Dashboard() {
     try {
       setLoading(true);
       setError(null); // clear any stale error before (re)loading
-      const data = await portfolioApi.getPortfolio();
+      const [data, snapshots] = await Promise.all([
+        portfolioApi.getPortfolio(),
+        portfolioApi.getHistory().catch(() => [] as SnapshotPoint[]),
+      ]);
       setPortfolio(data);
+      setHistory(snapshots);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load portfolio');
       console.error('Error loading portfolio:', err);
@@ -57,15 +72,10 @@ export default function Dashboard() {
     );
   }
 
-  // Placeholder growth series until portfolio snapshots are added (Phase 2)
-  const chartLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const chartData = [
-    portfolio.totalPortfolioValue - 2000,
-    portfolio.totalPortfolioValue - 1500,
-    portfolio.totalPortfolioValue - 800,
-    portfolio.totalPortfolioValue + 200,
-    portfolio.totalPortfolioValue,
-  ];
+  // Real portfolio growth from recorded snapshots
+  const hasHistory = history.length >= 2;
+  const chartLabels = history.map((s) => formatSnapshotLabel(s.capturedAt));
+  const chartData = history.map((s) => s.totalValue);
 
   const isPositive = portfolio.totalGainLoss >= 0;
 
@@ -100,7 +110,16 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <PortfolioChart data={chartData} labels={chartLabels} />
+          {hasHistory ? (
+            <PortfolioChart data={chartData} labels={chartLabels} />
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-center text-gray-400">
+              <p className="font-medium text-gray-500">Building your growth chart…</p>
+              <p className="text-sm mt-1">
+                Portfolio value is recorded periodically — check back shortly.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Holdings — vertical column, Wealthsimple style */}

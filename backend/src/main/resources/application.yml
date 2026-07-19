@@ -53,6 +53,11 @@ cache:
   market-data-ttl: 5 # seconds
   portfolio-ttl: 10 # seconds
 
+# Portfolio snapshot capture (for the dashboard growth chart)
+snapshot:
+  initial-delay-ms: 15000  # first capture 15s after startup
+  interval-ms: 60000       # then every 60s (lower for faster chart population in dev)
+
 logging:
   level:
     com.papertrade: DEBUG

@@ -83,8 +83,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Portfolio snapshots (time series of total portfolio value for the growth chart)
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+    snapshot_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+    total_value NUMERIC(15, 2) NOT NULL,
+    cash_balance NUMERIC(15, 2) NOT NULL,
+    position_value NUMERIC(15, 2) NOT NULL,
+    captured_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
 CREATE INDEX idx_accounts_user_id ON accounts(user_id);
+CREATE INDEX idx_snapshots_account_time ON portfolio_snapshots(account_id, captured_at);
 CREATE INDEX idx_positions_account_id ON positions(account_id);
 CREATE INDEX idx_orders_account_id ON orders(account_id);
 CREATE INDEX idx_orders_status ON orders(status);
