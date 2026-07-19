@@ -31,10 +31,14 @@ jwt:
   expiration: 86400000 # 24 hours in milliseconds
   refresh-expiration: 604800000 # 7 days
 
-# Finnhub API
+# Finnhub API (real-time quotes, search, WebSocket streaming)
 finnhub:
   api-key: ${FINNHUB_API_KEY:}
   websocket-url: wss://ws.finnhub.io
+
+# Twelve Data API (historical candles for charts)
+twelvedata:
+  api-key: ${TWELVE_DATA_API_KEY:}
 
 # Trading Configuration
 trading:

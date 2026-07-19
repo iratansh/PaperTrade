@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -39,6 +40,7 @@ public class OrderService {
     private final PositionRepository positionRepository;
     private final TransactionRepository transactionRepository;
     private final MarketDataService marketDataService;
+    private final TransactionalOperator txOperator;
 
     /**
      * Place a new order (buy or sell)
@@ -52,7 +54,6 @@ public class OrderService {
      * @param request The order request
      * @return OrderResponse with execution details
      */
-    @Transactional
     public Mono<OrderResponse> placeOrder(PlaceOrderRequest request) {
         log.info("Placing {} order for {} shares of {}",
                  request.getSide(), request.getQuantity(), request.getSymbol());
@@ -61,16 +62,33 @@ public class OrderService {
         if (request.getIdempotencyKey() != null) {
             return orderRepository.findByIdempotencyKey(request.getIdempotencyKey())
                 .map(this::toOrderResponse)
-                .switchIfEmpty(Mono.defer(() -> executeOrder(request)));
+                .switchIfEmpty(Mono.defer(() -> fetchPriceThenExecute(request)));
         }
 
-        return executeOrder(request);
+        return fetchPriceThenExecute(request);
     }
 
     /**
-     * Execute the order - this is where pessimistic locking happens
+     * Fetch the current market price BEFORE opening the transaction.
+     *
+     * This is critical: the external HTTP call to Finnhub must NOT happen while
+     * holding a database lock. Fetching the price first means the pessimistic
+     * lock (FOR UPDATE) is only held for the fast, local DB work - never across
+     * a slow network call. Holding a row lock during external I/O would stall
+     * other traders and risks request timeouts.
      */
-    private Mono<OrderResponse> executeOrder(PlaceOrderRequest request) {
+    private Mono<OrderResponse> fetchPriceThenExecute(PlaceOrderRequest request) {
+        return marketDataService.getCurrentPrice(request.getSymbol())
+            .flatMap(currentPrice ->
+                // Only the DB work runs inside the transaction
+                executeOrder(request, currentPrice).as(txOperator::transactional));
+    }
+
+    /**
+     * Execute the order - this is where pessimistic locking happens.
+     * Runs entirely inside a transaction; the price is already known.
+     */
+    private Mono<OrderResponse> executeOrder(PlaceOrderRequest request, BigDecimal currentPrice) {
         // Acquire PESSIMISTIC LOCK on account (prevents concurrent balance modifications)
         return accountRepository.findByIdWithLock(request.getAccountId())
             .switchIfEmpty(Mono.error(new AccountNotFoundException(request.getAccountId())))
@@ -80,9 +98,9 @@ public class OrderService {
 
                 // Execute based on order side (BUY vs SELL)
                 if (request.getSide() == OrderSide.BUY) {
-                    return executeBuyOrder(order, account);
+                    return executeBuyOrder(order, account, currentPrice);
                 } else {
-                    return executeSellOrder(order, account);
+                    return executeSellOrder(order, account, currentPrice);
                 }
             })
             .map(this::toOrderResponse);
@@ -97,39 +115,36 @@ public class OrderService {
      * 4. Create or update position
      * 5. Record transaction
      */
-    private Mono<Order> executeBuyOrder(Order order, TradingAccount account) {
-        return marketDataService.getCurrentPrice(order.getSymbol())
-            .flatMap(currentPrice -> {
-                // Determine execution price
-                BigDecimal executionPrice = determineExecutionPrice(order, currentPrice);
-                BigDecimal totalCost = executionPrice.multiply(order.getQuantity());
+    private Mono<Order> executeBuyOrder(Order order, TradingAccount account, BigDecimal currentPrice) {
+        // Determine execution price (price already fetched, no network call here)
+        BigDecimal executionPrice = determineExecutionPrice(order, currentPrice);
+        BigDecimal totalCost = executionPrice.multiply(order.getQuantity());
 
-                // Validate sufficient funds (critical section - lock held!)
-                if (!account.canPlaceOrder(totalCost)) {
-                    order.setStatus(OrderStatus.REJECTED);
-                    return orderRepository.save(order)
-                        .flatMap(savedOrder -> Mono.error(
-                            new InsufficientFundsException(
-                                String.format("Insufficient funds. Required: $%.2f, Available: $%.2f",
-                                              totalCost, account.getBalance()))));
-                }
+        // Validate sufficient funds (critical section - lock held!)
+        if (!account.canPlaceOrder(totalCost)) {
+            order.setStatus(OrderStatus.REJECTED);
+            return orderRepository.save(order)
+                .flatMap(savedOrder -> Mono.error(
+                    new InsufficientFundsException(
+                        String.format("Insufficient funds. Required: $%.2f, Available: $%.2f",
+                                      totalCost, account.getBalance()))));
+        }
 
-                // Debit account balance
-                account.debit(totalCost);
+        // Debit account balance
+        account.debit(totalCost);
 
-                // Mark order as filled
-                order.markFilled(executionPrice, order.getQuantity());
+        // Mark order as filled
+        order.markFilled(executionPrice, order.getQuantity());
 
-                // Save order, update account, update position, log transaction (all atomic)
-                return orderRepository.save(order)
-                    .flatMap(savedOrder -> accountRepository.save(account)
-                        .then(updatePositionForBuy(account.getAccountId(),
-                                                   order.getSymbol(),
-                                                   order.getQuantity(),
-                                                   executionPrice))
-                        .then(recordTransaction(savedOrder, executionPrice, TransactionType.BUY))
-                        .thenReturn(savedOrder));
-            });
+        // Save order, update account, update position, log transaction (all atomic)
+        return orderRepository.save(order)
+            .flatMap(savedOrder -> accountRepository.save(account)
+                .then(updatePositionForBuy(account.getAccountId(),
+                                           order.getSymbol(),
+                                           order.getQuantity(),
+                                           executionPrice))
+                .then(recordTransaction(savedOrder, executionPrice, TransactionType.BUY))
+                .thenReturn(savedOrder));
     }
 
     /**
@@ -141,46 +156,43 @@ public class OrderService {
      * 4. Update or remove position
      * 5. Record transaction
      */
-    private Mono<Order> executeSellOrder(Order order, TradingAccount account) {
-        return marketDataService.getCurrentPrice(order.getSymbol())
-            .flatMap(currentPrice -> {
-                BigDecimal executionPrice = determineExecutionPrice(order, currentPrice);
+    private Mono<Order> executeSellOrder(Order order, TradingAccount account, BigDecimal currentPrice) {
+        BigDecimal executionPrice = determineExecutionPrice(order, currentPrice);
 
-                // Acquire PESSIMISTIC LOCK on position (prevent overselling)
-                return positionRepository.findByAccountIdAndSymbolWithLock(
-                        account.getAccountId(), order.getSymbol())
-                    .switchIfEmpty(Mono.error(
-                        new InsufficientSharesException("No position found for " + order.getSymbol())))
-                    .flatMap(position -> {
-                        // Validate sufficient shares (critical section - lock held!)
-                        if (position.getQuantity().compareTo(order.getQuantity()) < 0) {
-                            order.setStatus(OrderStatus.REJECTED);
-                            return orderRepository.save(order)
-                                .flatMap(savedOrder -> Mono.error(
-                                    new InsufficientSharesException(
-                                        String.format("Insufficient shares. Required: %.4f, Available: %.4f",
-                                                      order.getQuantity(), position.getQuantity()))));
-                        }
+        // Acquire PESSIMISTIC LOCK on position (prevent overselling)
+        return positionRepository.findByAccountIdAndSymbolWithLock(
+                account.getAccountId(), order.getSymbol())
+            .switchIfEmpty(Mono.error(
+                new InsufficientSharesException("No position found for " + order.getSymbol())))
+            .flatMap(position -> {
+                // Validate sufficient shares (critical section - lock held!)
+                if (position.getQuantity().compareTo(order.getQuantity()) < 0) {
+                    order.setStatus(OrderStatus.REJECTED);
+                    return orderRepository.save(order)
+                        .flatMap(savedOrder -> Mono.error(
+                            new InsufficientSharesException(
+                                String.format("Insufficient shares. Required: %.4f, Available: %.4f",
+                                              order.getQuantity(), position.getQuantity()))));
+                }
 
-                        // Calculate proceeds
-                        BigDecimal proceeds = executionPrice.multiply(order.getQuantity());
+                // Calculate proceeds
+                BigDecimal proceeds = executionPrice.multiply(order.getQuantity());
 
-                        // Credit account balance
-                        account.credit(proceeds);
+                // Credit account balance
+                account.credit(proceeds);
 
-                        // Mark order as filled
-                        order.markFilled(executionPrice, order.getQuantity());
+                // Mark order as filled
+                order.markFilled(executionPrice, order.getQuantity());
 
-                        // Update position (reduce shares)
-                        position.removeShares(order.getQuantity());
+                // Update position (reduce shares)
+                position.removeShares(order.getQuantity());
 
-                        // Save everything atomically
-                        return orderRepository.save(order)
-                            .flatMap(savedOrder -> accountRepository.save(account)
-                                .then(saveOrDeletePosition(position))
-                                .then(recordTransaction(savedOrder, executionPrice, TransactionType.SELL))
-                                .thenReturn(savedOrder));
-                    });
+                // Save everything atomically
+                return orderRepository.save(order)
+                    .flatMap(savedOrder -> accountRepository.save(account)
+                        .then(saveOrDeletePosition(position))
+                        .then(recordTransaction(savedOrder, executionPrice, TransactionType.SELL))
+                        .thenReturn(savedOrder));
             });
     }
 
@@ -199,7 +211,7 @@ public class OrderService {
             .switchIfEmpty(Mono.defer(() -> {
                 // Create new position
                 Position newPosition = Position.builder()
-                    .positionId(UUID.randomUUID())
+                    // positionId generated by the database (INSERT on null @Id)
                     .accountId(accountId)
                     .symbol(symbol)
                     .quantity(quantity)
@@ -227,7 +239,7 @@ public class OrderService {
     private Mono<Transaction> recordTransaction(Order order, BigDecimal executionPrice,
                                                 TransactionType type) {
         Transaction transaction = Transaction.builder()
-            .transactionId(UUID.randomUUID())
+            // transactionId generated by the database (INSERT on null @Id)
             .orderId(order.getOrderId())
             .accountId(order.getAccountId())
             .symbol(order.getSymbol())
@@ -263,7 +275,8 @@ public class OrderService {
      */
     private Order buildOrder(PlaceOrderRequest request) {
         return Order.builder()
-            .orderId(UUID.randomUUID())
+            // orderId is generated by the database (DEFAULT gen_random_uuid()).
+            // Leaving @Id null lets Spring Data R2DBC treat this as a new row (INSERT).
             .accountId(request.getAccountId())
             .symbol(request.getSymbol().toUpperCase())
             .type(request.getType())
