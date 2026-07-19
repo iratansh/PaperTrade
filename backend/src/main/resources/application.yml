@@ -3,7 +3,7 @@ spring:
     name: papertrade
 
   r2dbc:
-    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:papertrade}
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:papertrade}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
     pool:
