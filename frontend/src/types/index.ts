@@ -4,6 +4,13 @@ export interface User {
   email: string;
 }
 
+export interface AuthResponse {
+  accessToken: string;
+  refreshToken: string;
+  userId: string;
+  username: string;
+}
+
 export interface Position {
   symbol: string;
   quantity: number;
@@ -37,8 +44,8 @@ export interface Order {
   filledAt?: string;
 }
 
+// accountId is resolved server-side from the JWT, so it's not sent by the client
 export interface PlaceOrderRequest {
-  accountId: string;
   symbol: string;
   type: 'MARKET' | 'LIMIT';
   side: 'BUY' | 'SELL';
@@ -51,3 +58,19 @@ export interface StockQuote {
   symbol: string;
   price: number;
 }
+
+export interface SymbolMatch {
+  symbol: string;
+  description: string;
+}
+
+export interface Candle {
+  datetime: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export type HistoryRange = '1D' | '1W' | '3M' | '1Y' | 'YTD';

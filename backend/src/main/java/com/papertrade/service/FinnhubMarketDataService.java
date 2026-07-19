@@ -1,11 +1,13 @@
 package com.papertrade.service;
 
+import com.papertrade.dto.SymbolMatch;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
@@ -97,9 +99,28 @@ public class FinnhubMarketDataService implements MarketDataService {
     }
 
     @Override
-    public Mono<String> searchSymbol(String query) {
-        // TODO: Implement symbol search
-        return Mono.just("Search not implemented yet");
+    public Flux<SymbolMatch> searchSymbol(String query) {
+        WebClient webClient = webClientBuilder.baseUrl(FINNHUB_BASE_URL).build();
+
+        return webClient.get()
+            .uri(uriBuilder -> uriBuilder
+                .path("/search")
+                .queryParam("q", query)
+                .queryParam("token", apiKey)
+                .build())
+            .retrieve()
+            .bodyToMono(FinnhubSearchResponse.class)
+            .flatMapMany(response -> {
+                if (response.getResult() == null) {
+                    return Flux.empty();
+                }
+                return Flux.fromIterable(response.getResult())
+                    // Common stocks with plain tickers (skip exotic/foreign symbols with '.')
+                    .filter(r -> r.getSymbol() != null && !r.getSymbol().contains("."))
+                    .map(r -> new SymbolMatch(r.getSymbol(), r.getDescription()))
+                    .take(15);
+            })
+            .doOnError(error -> log.error("Symbol search failed for '{}': {}", query, error.getMessage()));
     }
 
     /**
@@ -116,5 +137,22 @@ public class FinnhubMarketDataService implements MarketDataService {
         public BigDecimal getCurrentPrice() {
             return c;
         }
+    }
+
+    /**
+     * Finnhub /search response DTO
+     */
+    @lombok.Data
+    private static class FinnhubSearchResponse {
+        private int count;
+        private java.util.List<SearchResult> result;
+    }
+
+    @lombok.Data
+    private static class SearchResult {
+        private String description;
+        private String displaySymbol;
+        private String symbol;
+        private String type;
     }
 }

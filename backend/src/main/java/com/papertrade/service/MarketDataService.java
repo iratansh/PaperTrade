@@ -1,12 +1,14 @@
 package com.papertrade.service;
 
+import com.papertrade.dto.SymbolMatch;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 
 /**
- * Market data service interface
- * Implementations: FinnhubMarketDataService, AlphaVantageMarketDataService, etc.
+ * Real-time market data service interface (quotes + symbol search).
+ * Historical candles live in {@link HistoryProvider}.
  *
  * This demonstrates:
  * - Dependency Inversion Principle (depend on abstraction, not concrete implementation)
@@ -23,8 +25,8 @@ public interface MarketDataService {
 
     /**
      * Search for stocks by query
-     * @param query Search term
-     * @return List of matching symbols
+     * @param query Search term (ticker or company name)
+     * @return Matching symbols
      */
-    Mono<String> searchSymbol(String query);
+    Flux<SymbolMatch> searchSymbol(String query);
 }

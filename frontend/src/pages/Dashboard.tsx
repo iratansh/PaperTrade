@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wallet, TrendingUp } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, ChevronRight } from 'lucide-react';
 import PortfolioChart from '../components/PortfolioChart';
-import PositionCard from '../components/PositionCard';
 import { portfolioApi } from '../services/api';
 import { formatCurrency, formatPercent } from '../utils/format';
-import type { Portfolio } from '../types';
-
-// Temporary hardcoded user/account IDs (until we add auth)
-const TEMP_USER_ID = '123e4567-e89b-12d3-a456-426614174000';
+import type { Portfolio, Position } from '../types';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -23,7 +19,8 @@ export default function Dashboard() {
   const loadPortfolio = async () => {
     try {
       setLoading(true);
-      const data = await portfolioApi.getPortfolio(TEMP_USER_ID);
+      setError(null); // clear any stale error before (re)loading
+      const data = await portfolioApi.getPortfolio();
       setPortfolio(data);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load portfolio');
@@ -35,10 +32,10 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-[70vh]">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading portfolio...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Loading portfolio…</p>
         </div>
       </div>
     );
@@ -46,7 +43,7 @@ export default function Dashboard() {
 
   if (error || !portfolio) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-[70vh]">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error || 'No portfolio data'}</p>
           <button
@@ -60,9 +57,9 @@ export default function Dashboard() {
     );
   }
 
-  // Mock chart data (in production, fetch historical data)
-  const mockChartLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const mockChartData = [
+  // Placeholder growth series until portfolio snapshots are added (Phase 2)
+  const chartLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const chartData = [
     portfolio.totalPortfolioValue - 2000,
     portfolio.totalPortfolioValue - 1500,
     portfolio.totalPortfolioValue - 800,
@@ -74,11 +71,12 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Portfolio Summary */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-          <div className="flex items-center justify-between mb-6">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Portfolio summary */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="flex items-start justify-between mb-6">
             <div>
+              <p className="text-sm text-gray-500 mb-1">Portfolio value</p>
               <h1 className="text-3xl font-bold text-gray-900">
                 {formatCurrency(portfolio.totalPortfolioValue)}
               </h1>
@@ -94,7 +92,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-lg">
               <Wallet size={20} className="text-gray-600" />
               <div>
-                <p className="text-xs text-gray-500">Cash Balance</p>
+                <p className="text-xs text-gray-500">Cash</p>
                 <p className="text-lg font-semibold text-gray-900">
                   {formatCurrency(portfolio.cashBalance)}
                 </p>
@@ -102,30 +100,20 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <PortfolioChart data={mockChartData} labels={mockChartLabels} />
+          <PortfolioChart data={chartData} labels={chartLabels} />
         </div>
 
-        {/* Positions */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Your Positions</h2>
-            <button
-              onClick={() => navigate('/search')}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-            >
-              Add Position
-            </button>
+        {/* Holdings — vertical column, Wealthsimple style */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="text-lg font-semibold text-gray-900">Holdings</h2>
           </div>
 
           {portfolio.positions.length === 0 ? (
-            <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+            <div className="p-12 text-center">
               <TrendingUp size={48} className="text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                No positions yet
-              </h3>
-              <p className="text-gray-600 mb-6">
-                Start building your portfolio by buying your first stock
-              </p>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No holdings yet</h3>
+              <p className="text-gray-600 mb-6">Buy your first stock to start building your portfolio.</p>
               <button
                 onClick={() => navigate('/search')}
                 className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
@@ -134,40 +122,56 @@ export default function Dashboard() {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <ul className="divide-y divide-gray-100">
               {portfolio.positions.map((position) => (
-                <PositionCard
+                <PositionRow
                   key={position.symbol}
                   position={position}
-                  onClick={(symbol) => navigate(`/stock/${symbol}`)}
+                  onClick={() => navigate(`/stock/${position.symbol}`)}
                 />
               ))}
-            </div>
+            </ul>
           )}
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-sm text-gray-500 mb-1">Total Invested</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {formatCurrency(100000 - portfolio.cashBalance)}
-            </p>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-sm text-gray-500 mb-1">Position Value</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {formatCurrency(portfolio.totalPositionValue)}
-            </p>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-sm text-gray-500 mb-1">Number of Positions</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {portfolio.positions.length}
-            </p>
-          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function PositionRow({ position, onClick }: { position: Position; onClick: () => void }) {
+  const isPositive = position.unrealizedPnL >= 0;
+
+  return (
+    <li>
+      <button
+        onClick={onClick}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center shrink-0">
+            <span className="text-sm font-bold text-primary-700">
+              {position.symbol.slice(0, 2)}
+            </span>
+          </div>
+          <div>
+            <p className="font-semibold text-gray-900">{position.symbol}</p>
+            <p className="text-sm text-gray-500">
+              {position.quantity} shares · {formatCurrency(position.averageCost)} avg
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <p className="font-semibold text-gray-900">{formatCurrency(position.currentValue)}</p>
+            <p className={`text-sm font-medium flex items-center gap-1 justify-end ${isPositive ? 'text-success' : 'text-danger'}`}>
+              {isPositive ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              {isPositive ? '+' : ''}{formatCurrency(position.unrealizedPnL)} ({formatPercent(position.unrealizedPnLPercentage)})
+            </p>
+          </div>
+          <ChevronRight size={20} className="text-gray-300" />
+        </div>
+      </button>
+    </li>
   );
 }

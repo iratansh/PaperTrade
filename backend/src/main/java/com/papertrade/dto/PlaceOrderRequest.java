@@ -19,7 +19,7 @@ import java.util.UUID;
 @AllArgsConstructor
 public class PlaceOrderRequest {
 
-    @NotNull(message = "Account ID is required")
+    // Populated server-side from the authenticated user's account (not sent by the client)
     private UUID accountId;
 
     @NotBlank(message = "Symbol is required")

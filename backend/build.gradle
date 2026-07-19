@@ -41,8 +41,10 @@ dependencies {
     // Redis (Reactive)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
 
-    // WebSocket
-    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    // NOTE: spring-boot-starter-websocket was removed - it pulled in servlet MVC
+    // (Tomcat), forcing the app into servlet mode and breaking reactive security.
+    // The app runs on Netty/WebFlux. Reactive WebSocket support (for Finnhub
+    // streaming in Phase 2) comes from spring-webflux directly.
 
     // Validation
     implementation 'org.springframework.boot:spring-boot-starter-validation'

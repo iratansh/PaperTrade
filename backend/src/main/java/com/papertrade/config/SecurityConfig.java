@@ -1,27 +1,51 @@
 package com.papertrade.config;
 
+import com.papertrade.security.JwtAuthenticationFilter;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
+import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
+import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authentication.HttpStatusServerEntryPoint;
 
 /**
- * Security configuration
- * Currently permits all requests for MVP - JWT authentication will be added later
+ * Reactive (WebFlux) security configuration: stateless JWT authentication.
+ *
+ * - /api/auth/** and market-data reads are public.
+ * - Everything else requires a valid access token (added by the JWT WebFilter).
+ * - Unauthenticated requests to protected endpoints get 401 (no login redirect).
  */
 @Configuration
-@EnableWebSecurity
+@EnableWebFluxSecurity
+@RequiredArgsConstructor
 public class SecurityConfig {
 
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-            .csrf(csrf -> csrf.disable())  // Disable CSRF for API
-            .authorizeHttpRequests(auth -> auth
-                .anyRequest().permitAll()  // Allow all requests for now
-            );
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
-        return http.build();
+    @Bean
+    public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+        return http
+            .csrf(ServerHttpSecurity.CsrfSpec::disable)
+            .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
+            .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
+            .authorizeExchange(exchanges -> exchanges
+                .pathMatchers("/api/auth/**").permitAll()
+                // Market data (quotes/search/history) is public
+                .pathMatchers("/api/stocks/**").permitAll()
+                .anyExchange().authenticated())
+            .exceptionHandling(ex -> ex.authenticationEntryPoint(
+                new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)))
+            .addFilterAt(jwtAuthenticationFilter, SecurityWebFiltersOrder.AUTHENTICATION)
+            .build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 }

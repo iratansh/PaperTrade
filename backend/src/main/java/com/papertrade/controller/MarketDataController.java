@@ -2,6 +2,7 @@ package com.papertrade.controller;
 
 import com.papertrade.domain.enums.HistoryRange;
 import com.papertrade.dto.Candle;
+import com.papertrade.dto.SymbolMatch;
 import com.papertrade.service.HistoryProvider;
 import com.papertrade.service.MarketDataService;
 import lombok.RequiredArgsConstructor;
@@ -55,12 +56,12 @@ public class MarketDataController {
     }
 
     /**
-     * Search for stocks
+     * Search for stocks by ticker or company name.
      *
      * GET /api/stocks/search?q=apple
      */
     @GetMapping("/search")
-    public Mono<String> searchStocks(@RequestParam String q) {
+    public Flux<SymbolMatch> searchStocks(@RequestParam String q) {
         log.info("Searching stocks with query: {}", q);
         return marketDataService.searchSymbol(q);
     }
