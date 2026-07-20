@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in. NEVER commit terraform.tfvars (it holds secrets).
+# Alternatively provide these via environment: TF_VAR_jwt_secret, TF_VAR_finnhub_api_key, ...
+
+aws_region  = "us-east-1"
+environment = "prod"
+
+# Secrets (stored in SSM SecureString, injected into the ECS task at runtime)
+jwt_secret          = "replace-with-a-long-random-256-bit-secret"
+finnhub_api_key     = "your-finnhub-key"
+twelve_data_api_key = "your-twelve-data-key"
+
+# Optional sizing overrides
+# backend_desired_count = 1
+# db_instance_class     = "db.t4g.micro"
+# redis_node_type       = "cache.t4g.micro"

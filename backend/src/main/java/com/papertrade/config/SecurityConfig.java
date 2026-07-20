@@ -39,6 +39,8 @@ public class SecurityConfig {
                 // are public (EventSource can't send an auth header).
                 .pathMatchers("/api/stocks/**").permitAll()
                 .pathMatchers("/api/stream/**").permitAll()
+                // Health checks for load balancer / container orchestrator probes
+                .pathMatchers("/actuator/**").permitAll()
                 .anyExchange().authenticated())
             .exceptionHandling(ex -> ex.authenticationEntryPoint(
                 new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)))

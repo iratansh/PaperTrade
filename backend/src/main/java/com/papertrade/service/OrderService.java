@@ -41,6 +41,7 @@ public class OrderService {
     private final TransactionRepository transactionRepository;
     private final MarketDataService marketDataService;
     private final MarketHoursService marketHoursService;
+    private final OrderQueue orderQueue;
     private final TransactionalOperator txOperator;
 
     /**
@@ -103,11 +104,37 @@ public class OrderService {
     }
 
     /**
-     * Persist an order in PENDING state (queued).
+     * Persist an order in PENDING state and publish it to the execution queue.
+     * (Locally the queue is a no-op and the DB poller drains PENDING orders.)
      */
     private Mono<OrderResponse> queueOrder(Order order) {
         order.setStatus(OrderStatus.PENDING);
-        return orderRepository.save(order).map(this::toOrderResponse);
+        return orderRepository.save(order)
+            .flatMap(saved -> orderQueue.enqueue(saved.getOrderId()).thenReturn(saved))
+            .map(this::toOrderResponse);
+    }
+
+    /**
+     * Execute a single queued order by id, if it's still PENDING and its
+     * conditions are met. Used by the SQS consumer (aws profile).
+     */
+    public Mono<Void> processSingle(UUID orderId) {
+        return orderRepository.findById(orderId)
+            .filter(order -> order.getStatus() == OrderStatus.PENDING)
+            .flatMap(order -> marketDataService.getCurrentPrice(order.getSymbol())
+                .flatMap(price -> {
+                    boolean executable = marketHoursService.isMarketOpen()
+                        && (order.getType() == OrderType.MARKET || order.canExecuteAtPrice(price));
+                    if (!executable) {
+                        return Mono.empty(); // stays PENDING; re-driven later
+                    }
+                    return executeExistingOrder(order, price).as(txOperator::transactional);
+                }))
+            .onErrorResume(error -> {
+                log.error("Failed to process order {}: {}", orderId, error.getMessage());
+                return Mono.empty();
+            })
+            .then();
     }
 
     /**

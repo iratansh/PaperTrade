@@ -1,0 +1,8 @@
+.gradle
+build
+.env
+.env.*
+*.md
+.idea
+.vscode
+gradle.properties

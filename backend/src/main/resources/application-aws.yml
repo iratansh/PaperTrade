@@ -1,0 +1,46 @@
+# AWS/production profile. Activated with SPRING_PROFILES_ACTIVE=aws.
+#
+# Every value comes from the environment. In AWS these are injected by ECS from
+# SSM Parameter Store / Secrets Manager (see terraform/), so no secrets are baked
+# into the image or committed to source.
+
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    pool:
+      initial-size: 5
+      max-size: 20
+
+  flyway:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    user: ${DB_USER}
+    password: ${DB_PASSWORD}
+    baseline-on-migrate: true
+    baseline-version: 1
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+
+jwt:
+  secret: ${JWT_SECRET}
+
+finnhub:
+  api-key: ${FINNHUB_API_KEY}
+
+twelvedata:
+  api-key: ${TWELVE_DATA_API_KEY}
+
+# AWS-specific wiring
+aws:
+  region: ${AWS_REGION:us-east-1}
+  sqs:
+    order-queue-url: ${ORDER_QUEUE_URL}
+
+logging:
+  level:
+    com.papertrade: INFO
+    org.springframework.r2dbc: WARN

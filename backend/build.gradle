@@ -49,6 +49,18 @@ dependencies {
     // Validation
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
+    // Health checks / metrics for ECS + ALB probes
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // Flyway DB migrations (run over JDBC at startup; app runs on R2DBC).
+    // Boot 3.2 ships Flyway 9, which bundles Postgres support in flyway-core.
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.springframework:spring-jdbc'
+
+    // AWS SQS (order queue) - used only under the "aws" profile
+    implementation platform('software.amazon.awssdk:bom:2.25.30')
+    implementation 'software.amazon.awssdk:sqs'
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'

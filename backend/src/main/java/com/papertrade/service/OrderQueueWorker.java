@@ -2,18 +2,19 @@ package com.papertrade.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
  * Drains the PENDING order queue on a schedule while the market is open.
  *
- * This is a placeholder for the eventual SQS + background-worker setup: the
- * queue is the orders table (status = PENDING) and this scheduled poller is the
- * worker. Swapping to SQS later means replacing this class, not the order logic.
+ * This is the LOCAL execution driver (active when the "aws" profile is off).
+ * In the cloud, SQS + {@code SqsOrderConsumer} drive execution instead.
  */
 @Slf4j
 @Component
+@Profile("!aws")
 @RequiredArgsConstructor
 public class OrderQueueWorker {
 

@@ -10,6 +10,15 @@ spring:
       initial-size: 10
       max-size: 50
 
+  # Flyway runs migrations over JDBC at startup (the app itself uses R2DBC).
+  flyway:
+    enabled: true
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:papertrade}
+    user: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    baseline-on-migrate: true
+    baseline-version: 1
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -24,6 +33,18 @@ spring:
 
 server:
   port: 8080
+
+# Actuator (health probes for ECS / ALB target groups)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
 
 # JWT Configuration
 jwt:
