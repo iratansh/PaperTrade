@@ -6,6 +6,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import StockDetail from './pages/StockDetail';
 import Search from './pages/Search';
+import History from './pages/History';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
@@ -20,6 +21,7 @@ function AppShell() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/stock/:symbol" element={<StockDetail />} />
         <Route path="/search" element={<Search />} />
+        <Route path="/history" element={<History />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </>

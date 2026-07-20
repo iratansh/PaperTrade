@@ -1,6 +1,7 @@
-import { Search, TrendingUp, LogOut } from 'lucide-react';
+import { Search, TrendingUp, LogOut, Clock } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -20,14 +21,24 @@ export default function Navbar() {
             <span className="text-xl font-bold text-gray-900">PaperTrade</span>
           </Link>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => navigate('/search')}
-              className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <Search size={20} />
               <span className="hidden sm:inline">Search</span>
             </button>
+
+            <button
+              onClick={() => navigate('/history')}
+              className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <Clock size={20} />
+              <span className="hidden sm:inline">Activity</span>
+            </button>
+
+            <NotificationBell />
 
             {user && (
               <span className="hidden sm:inline text-sm text-gray-500 px-2">

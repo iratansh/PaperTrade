@@ -35,8 +35,10 @@ public class SecurityConfig {
             .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
             .authorizeExchange(exchanges -> exchanges
                 .pathMatchers("/api/auth/**").permitAll()
-                // Market data (quotes/search/history) is public
+                // Market data (quotes/search/history) and the live SSE price feed
+                // are public (EventSource can't send an auth header).
                 .pathMatchers("/api/stocks/**").permitAll()
+                .pathMatchers("/api/stream/**").permitAll()
                 .anyExchange().authenticated())
             .exceptionHandling(ex -> ex.authenticationEntryPoint(
                 new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)))

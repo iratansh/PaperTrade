@@ -40,6 +40,7 @@ public class OrderService {
     private final PositionRepository positionRepository;
     private final TransactionRepository transactionRepository;
     private final MarketDataService marketDataService;
+    private final MarketHoursService marketHoursService;
     private final TransactionalOperator txOperator;
 
     /**
@@ -62,48 +63,92 @@ public class OrderService {
         if (request.getIdempotencyKey() != null) {
             return orderRepository.findByIdempotencyKey(request.getIdempotencyKey())
                 .map(this::toOrderResponse)
-                .switchIfEmpty(Mono.defer(() -> fetchPriceThenExecute(request)));
+                .switchIfEmpty(Mono.defer(() -> submitOrder(request)));
         }
 
-        return fetchPriceThenExecute(request);
+        return submitOrder(request);
     }
 
     /**
-     * Fetch the current market price BEFORE opening the transaction.
+     * Decide whether to execute an order now or queue it as PENDING.
      *
-     * This is critical: the external HTTP call to Finnhub must NOT happen while
-     * holding a database lock. Fetching the price first means the pessimistic
-     * lock (FOR UPDATE) is only held for the fast, local DB work - never across
-     * a slow network call. Holding a row lock during external I/O would stall
-     * other traders and risks request timeouts.
+     * - Market closed          -> queue (a background worker fills it when open).
+     * - Market open, MARKET     -> execute immediately at the current price.
+     * - Market open, LIMIT met   -> execute at the limit price.
+     * - Market open, LIMIT unmet -> queue (rests on the book until the price hits).
+     *
+     * Later this queue moves to SQS + a dedicated worker; today it's the orders
+     * table (status = PENDING) drained by a scheduled worker.
      */
-    private Mono<OrderResponse> fetchPriceThenExecute(PlaceOrderRequest request) {
+    private Mono<OrderResponse> submitOrder(PlaceOrderRequest request) {
+        Order order = buildOrder(request);
+
+        if (!marketHoursService.isMarketOpen()) {
+            log.info("Market closed - queuing {} order for {}", order.getSide(), order.getSymbol());
+            return queueOrder(order);
+        }
+
         return marketDataService.getCurrentPrice(request.getSymbol())
-            .flatMap(currentPrice ->
-                // Only the DB work runs inside the transaction
-                executeOrder(request, currentPrice).as(txOperator::transactional));
+            .flatMap(price -> {
+                boolean executable = order.getType() == OrderType.MARKET || order.canExecuteAtPrice(price);
+                if (executable) {
+                    return executeExistingOrder(order, price)
+                        .as(txOperator::transactional)
+                        .map(this::toOrderResponse);
+                }
+                log.info("Limit condition not met - queuing {} order for {}",
+                         order.getSide(), order.getSymbol());
+                return queueOrder(order);
+            });
     }
 
     /**
-     * Execute the order - this is where pessimistic locking happens.
-     * Runs entirely inside a transaction; the price is already known.
+     * Persist an order in PENDING state (queued).
      */
-    private Mono<OrderResponse> executeOrder(PlaceOrderRequest request, BigDecimal currentPrice) {
-        // Acquire PESSIMISTIC LOCK on account (prevents concurrent balance modifications)
-        return accountRepository.findByIdWithLock(request.getAccountId())
-            .switchIfEmpty(Mono.error(new AccountNotFoundException(request.getAccountId())))
-            .flatMap(account -> {
-                // Create order object
-                Order order = buildOrder(request);
+    private Mono<OrderResponse> queueOrder(Order order) {
+        order.setStatus(OrderStatus.PENDING);
+        return orderRepository.save(order).map(this::toOrderResponse);
+    }
 
-                // Execute based on order side (BUY vs SELL)
-                if (request.getSide() == OrderSide.BUY) {
-                    return executeBuyOrder(order, account, currentPrice);
-                } else {
-                    return executeSellOrder(order, account, currentPrice);
+    /**
+     * Execute a single order (new or previously-queued) inside a transaction.
+     * Acquires the pessimistic account lock; the price is already known.
+     */
+    private Mono<Order> executeExistingOrder(Order order, BigDecimal currentPrice) {
+        return accountRepository.findByIdWithLock(order.getAccountId())
+            .switchIfEmpty(Mono.error(new AccountNotFoundException(order.getAccountId())))
+            .flatMap(account -> order.getSide() == OrderSide.BUY
+                ? executeBuyOrder(order, account, currentPrice)
+                : executeSellOrder(order, account, currentPrice));
+    }
+
+    /**
+     * Drain the PENDING order queue - executes any order whose conditions are
+     * now met. Called by the scheduled queue worker while the market is open.
+     * One failing order never blocks the rest.
+     */
+    public Mono<Long> processPendingOrders() {
+        if (!marketHoursService.isMarketOpen()) {
+            return Mono.just(0L);
+        }
+        return orderRepository.findByStatus(OrderStatus.PENDING)
+            .flatMap(this::processQueuedOrder)
+            .count();
+    }
+
+    private Mono<Order> processQueuedOrder(Order order) {
+        return marketDataService.getCurrentPrice(order.getSymbol())
+            .flatMap(price -> {
+                boolean executable = order.getType() == OrderType.MARKET || order.canExecuteAtPrice(price);
+                if (!executable) {
+                    return Mono.empty(); // leave PENDING; retried next cycle
                 }
+                return executeExistingOrder(order, price).as(txOperator::transactional);
             })
-            .map(this::toOrderResponse);
+            .onErrorResume(error -> {
+                log.error("Failed to fill queued order {}: {}", order.getOrderId(), error.getMessage());
+                return Mono.empty(); // don't let one bad order stop the queue
+            });
     }
 
     /**

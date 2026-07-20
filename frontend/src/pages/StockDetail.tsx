@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp } from 'lucide-react';
+import { ArrowLeft, TrendingUp, Star, Bell } from 'lucide-react';
 import StockChart from '../components/StockChart';
-import { marketDataApi, ordersApi, portfolioApi } from '../services/api';
+import { marketDataApi, ordersApi, portfolioApi, watchlistApi } from '../services/api';
 import { formatCurrency, formatPercent } from '../utils/format';
 import { useToast } from '../context/ToastContext';
+import { useLivePrices } from '../hooks/useLivePrices';
 import type { StockQuote, PlaceOrderRequest, Candle, HistoryRange, Position } from '../types';
 
 const RANGES: HistoryRange[] = ['1D', '1W', '3M', '1Y', 'YTD'];
 
 export default function StockDetail() {
   const { symbol } = useParams<{ symbol: string }>();
+  const upperSymbol = symbol?.toUpperCase() ?? '';
   const navigate = useNavigate();
   const { showToast } = useToast();
 
@@ -30,10 +32,18 @@ export default function StockDetail() {
   const [cashBalance, setCashBalance] = useState(0);
   const [heldShares, setHeldShares] = useState(0);
 
+  const [isWatched, setIsWatched] = useState(false);
+  const [alertPrice, setAlertPrice] = useState('');
+
+  // Live price via SSE; falls back to the initial quote until the first tick.
+  const livePrices = useLivePrices(upperSymbol ? [upperSymbol] : []);
+  const livePrice = livePrices[upperSymbol] ?? quote?.price ?? 0;
+
   useEffect(() => {
     if (symbol) {
       loadStockData();
       loadAccountState();
+      loadWatchStatus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
@@ -85,6 +95,49 @@ export default function StockDetail() {
     }
   };
 
+  const loadWatchStatus = async () => {
+    try {
+      const list = await watchlistApi.list();
+      const entry = list.find((w) => w.symbol === upperSymbol);
+      setIsWatched(!!entry);
+      setAlertPrice(entry?.alertPrice != null ? String(entry.alertPrice) : '');
+    } catch (err) {
+      console.error('Error loading watch status:', err);
+    }
+  };
+
+  const toggleWatch = async () => {
+    try {
+      if (isWatched) {
+        await watchlistApi.remove(upperSymbol);
+        setIsWatched(false);
+        setAlertPrice('');
+        showToast(`Removed ${upperSymbol} from watchlist`, 'info');
+      } else {
+        await watchlistApi.add(upperSymbol);
+        setIsWatched(true);
+        showToast(`Added ${upperSymbol} to watchlist`, 'success');
+      }
+    } catch {
+      showToast('Failed to update watchlist', 'error');
+    }
+  };
+
+  const saveAlert = async () => {
+    const price = parseFloat(alertPrice);
+    if (isNaN(price) || price <= 0) {
+      showToast('Enter a valid alert price', 'error');
+      return;
+    }
+    try {
+      await watchlistApi.add(upperSymbol, price);
+      setIsWatched(true);
+      showToast(`Alert set for ${upperSymbol} at ${formatCurrency(price)}`, 'success');
+    } catch {
+      showToast('Failed to set alert', 'error');
+    }
+  };
+
   const handlePlaceOrder = async () => {
     if (!symbol || !quote) return;
 
@@ -94,7 +147,7 @@ export default function StockDetail() {
       return;
     }
 
-    const price = isMarketOrder ? quote.price : parseFloat(limitPrice);
+    const price = isMarketOrder ? livePrice : parseFloat(limitPrice);
     const estimatedCost = qty * price;
 
     if (orderType === 'BUY' && estimatedCost > cashBalance) {
@@ -120,10 +173,19 @@ export default function StockDetail() {
         idempotencyKey: `order-${Date.now()}-${Math.random()}`,
       };
       const order = await ordersApi.placeOrder(request);
-      showToast(
-        `${order.side} ${order.filledQuantity} ${order.symbol} @ ${formatCurrency(order.filledPrice || 0)}`,
-        'success'
-      );
+      if (order.status === 'FILLED') {
+        showToast(
+          `${order.side} ${order.filledQuantity} ${order.symbol} @ ${formatCurrency(order.filledPrice || 0)}`,
+          'success'
+        );
+      } else if (order.status === 'PENDING') {
+        showToast(
+          `${order.side} ${order.quantity} ${order.symbol} queued — will fill when the market opens or the price is met`,
+          'info'
+        );
+      } else {
+        showToast(`Order ${order.status.toLowerCase()}`, 'error');
+      }
       navigate('/dashboard');
     } catch (err: any) {
       showToast(err.response?.data?.message || 'Failed to place order', 'error');
@@ -149,7 +211,7 @@ export default function StockDetail() {
   }
 
   const estimatedTotal =
-    parseFloat(quantity || '0') * (isMarketOrder ? quote.price : parseFloat(limitPrice || '0'));
+    parseFloat(quantity || '0') * (isMarketOrder ? livePrice : parseFloat(limitPrice || '0'));
 
   // Period change over the selected range (first vs last close)
   const periodChange =
@@ -173,18 +235,55 @@ export default function StockDetail() {
 
         {/* Price + chart */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            <TrendingUp size={28} className="text-primary-600" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">{symbol?.toUpperCase()}</h1>
-              <p className="text-3xl font-bold text-gray-900">{formatCurrency(quote.price)}</p>
-              {candles.length >= 2 && (
-                <p className={`text-sm font-medium mt-1 ${periodPositive ? 'text-success' : 'text-danger'}`}>
-                  {periodPositive ? '+' : '-'}{formatCurrency(Math.abs(periodChange))} ({formatPercent(periodChangePct)}){' '}
-                  <span className="text-gray-400 font-normal">{range}</span>
-                </p>
-              )}
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <TrendingUp size={28} className="text-primary-600" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">{upperSymbol}</h1>
+                <p className="text-3xl font-bold text-gray-900">{formatCurrency(livePrice)}</p>
+                {candles.length >= 2 && (
+                  <p className={`text-sm font-medium mt-1 ${periodPositive ? 'text-success' : 'text-danger'}`}>
+                    {periodPositive ? '+' : '-'}{formatCurrency(Math.abs(periodChange))} ({formatPercent(periodChangePct)}){' '}
+                    <span className="text-gray-400 font-normal">{range}</span>
+                  </p>
+                )}
+              </div>
             </div>
+            <button
+              onClick={toggleWatch}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-colors ${
+                isWatched
+                  ? 'border-yellow-300 bg-yellow-50 text-yellow-700'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+              }`}
+              title={isWatched ? 'Remove from watchlist' : 'Add to watchlist'}
+            >
+              <Star size={18} fill={isWatched ? 'currentColor' : 'none'} />
+              <span className="text-sm font-medium hidden sm:inline">
+                {isWatched ? 'Watching' : 'Watch'}
+              </span>
+            </button>
+          </div>
+
+          {/* Price alert */}
+          <div className="flex items-center gap-2 mb-4 p-3 bg-gray-50 rounded-lg">
+            <Bell size={16} className="text-gray-500 shrink-0" />
+            <span className="text-sm text-gray-600 shrink-0">Alert me at</span>
+            <input
+              type="number"
+              value={alertPrice}
+              onChange={(e) => setAlertPrice(e.target.value)}
+              placeholder="price"
+              min="0.01"
+              step="0.01"
+              className="w-28 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-primary-600 focus:border-transparent text-sm"
+            />
+            <button
+              onClick={saveAlert}
+              className="px-3 py-1 bg-primary-600 text-white rounded text-sm font-medium hover:bg-primary-700"
+            >
+              Set alert
+            </button>
           </div>
 
           <div className={chartLoading ? 'opacity-50 transition-opacity' : ''}>

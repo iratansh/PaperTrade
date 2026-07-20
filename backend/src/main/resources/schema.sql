@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS watchlist (
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     symbol VARCHAR(10) NOT NULL,
     alert_price NUMERIC(15, 2),
+    alert_direction VARCHAR(5),           -- ABOVE / BELOW (relative to price when set)
+    triggered BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, symbol)
 );

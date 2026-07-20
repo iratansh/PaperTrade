@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wallet, TrendingUp, TrendingDown, ChevronRight } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, ChevronRight, Star } from 'lucide-react';
 import PortfolioChart from '../components/PortfolioChart';
-import { portfolioApi } from '../services/api';
+import { portfolioApi, watchlistApi } from '../services/api';
 import { formatCurrency, formatPercent } from '../utils/format';
-import type { Portfolio, Position, SnapshotPoint } from '../types';
+import { useLivePrices } from '../hooks/useLivePrices';
+import type { Portfolio, Position, SnapshotPoint, WatchlistItem } from '../types';
 
 function formatSnapshotLabel(iso: string): string {
   const d = new Date(iso);
@@ -20,8 +21,16 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [history, setHistory] = useState<SnapshotPoint[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Live prices for everything on screen (positions + watched symbols)
+  const streamedSymbols = [
+    ...(portfolio?.positions.map((p) => p.symbol) ?? []),
+    ...watchlist.map((w) => w.symbol),
+  ];
+  const livePrices = useLivePrices([...new Set(streamedSymbols)]);
 
   useEffect(() => {
     loadPortfolio();
@@ -31,12 +40,14 @@ export default function Dashboard() {
     try {
       setLoading(true);
       setError(null); // clear any stale error before (re)loading
-      const [data, snapshots] = await Promise.all([
+      const [data, snapshots, watched] = await Promise.all([
         portfolioApi.getPortfolio(),
         portfolioApi.getHistory().catch(() => [] as SnapshotPoint[]),
+        watchlistApi.list().catch(() => [] as WatchlistItem[]),
       ]);
       setPortfolio(data);
       setHistory(snapshots);
+      setWatchlist(watched);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load portfolio');
       console.error('Error loading portfolio:', err);
@@ -77,7 +88,27 @@ export default function Dashboard() {
   const chartLabels = history.map((s) => formatSnapshotLabel(s.capturedAt));
   const chartData = history.map((s) => s.totalValue);
 
-  const isPositive = portfolio.totalGainLoss >= 0;
+  // Merge live SSE prices into positions so values/P&L update in real time
+  const livePositions = portfolio.positions.map((p) => {
+    const price = livePrices[p.symbol] ?? p.currentPrice;
+    const currentValue = price * p.quantity;
+    const costBasis = p.averageCost * p.quantity;
+    const unrealizedPnL = currentValue - costBasis;
+    return {
+      ...p,
+      currentPrice: price,
+      currentValue,
+      unrealizedPnL,
+      unrealizedPnLPercentage: costBasis !== 0 ? (unrealizedPnL / costBasis) * 100 : 0,
+    };
+  });
+  const liveTotalPositionValue = livePositions.reduce((s, p) => s + p.currentValue, 0);
+  const liveTotalValue = portfolio.cashBalance + liveTotalPositionValue;
+  const liveGainLoss = livePositions.reduce((s, p) => s + p.unrealizedPnL, 0);
+  const investedCost = livePositions.reduce((s, p) => s + p.averageCost * p.quantity, 0);
+  const liveGainLossPct = investedCost !== 0 ? (liveGainLoss / investedCost) * 100 : 0;
+
+  const isPositive = liveGainLoss >= 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -88,14 +119,14 @@ export default function Dashboard() {
             <div>
               <p className="text-sm text-gray-500 mb-1">Portfolio value</p>
               <h1 className="text-3xl font-bold text-gray-900">
-                {formatCurrency(portfolio.totalPortfolioValue)}
+                {formatCurrency(liveTotalValue)}
               </h1>
               <div className="flex items-center gap-2 mt-2">
                 <span className={`text-lg font-semibold ${isPositive ? 'text-success' : 'text-danger'}`}>
-                  {isPositive ? '+' : ''}{formatCurrency(portfolio.totalGainLoss)}
+                  {isPositive ? '+' : ''}{formatCurrency(liveGainLoss)}
                 </span>
                 <span className={`text-sm font-medium ${isPositive ? 'text-success' : 'text-danger'}`}>
-                  ({formatPercent(portfolio.totalGainLossPercentage)})
+                  ({formatPercent(liveGainLossPct)})
                 </span>
               </div>
             </div>
@@ -142,7 +173,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {portfolio.positions.map((position) => (
+              {livePositions.map((position) => (
                 <PositionRow
                   key={position.symbol}
                   position={position}
@@ -152,6 +183,46 @@ export default function Dashboard() {
             </ul>
           )}
         </div>
+
+        {/* Watchlist */}
+        {watchlist.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-6">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+              <Star size={18} className="text-yellow-500" fill="currentColor" />
+              <h2 className="text-lg font-semibold text-gray-900">Watchlist</h2>
+            </div>
+            <ul className="divide-y divide-gray-100">
+              {watchlist.map((item) => {
+                const price = livePrices[item.symbol];
+                return (
+                  <li key={item.symbol}>
+                    <button
+                      onClick={() => navigate(`/stock/${item.symbol}`)}
+                      className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors text-left"
+                    >
+                      <div>
+                        <p className="font-semibold text-gray-900">{item.symbol}</p>
+                        {item.alertPrice != null && (
+                          <p className="text-sm text-gray-500">
+                            Alert {item.alertDirection === 'BELOW' ? '≤' : '≥'}{' '}
+                            {formatCurrency(item.alertPrice)}
+                            {item.triggered ? ' · triggered' : ''}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-gray-900">
+                          {price != null ? formatCurrency(price) : '—'}
+                        </p>
+                        <p className="text-xs text-gray-400">{price != null ? 'live' : 'no ticks'}</p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

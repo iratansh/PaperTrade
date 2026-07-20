@@ -58,6 +58,11 @@ snapshot:
   initial-delay-ms: 15000  # first capture 15s after startup
   interval-ms: 60000       # then every 60s (lower for faster chart population in dev)
 
+# Order queue worker (fills PENDING orders while the market is open)
+order-queue:
+  initial-delay-ms: 20000
+  interval-ms: 30000
+
 logging:
   level:
     com.papertrade: DEBUG

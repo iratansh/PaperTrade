@@ -79,3 +79,35 @@ export interface SnapshotPoint {
   capturedAt: string;
   totalValue: number;
 }
+
+export interface WatchlistItem {
+  symbol: string;
+  alertPrice: number | null;
+  alertDirection: 'ABOVE' | 'BELOW' | null;
+  triggered: boolean;
+}
+
+export interface AppNotification {
+  notificationId: string;
+  type: string;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface TransactionRecord {
+  transactionId: string;
+  symbol: string;
+  type: 'BUY' | 'SELL';
+  quantity: number;
+  price: number;
+  fees: number;
+  totalValue: number;
+  timestamp: string;
+}
+
+export interface PriceUpdate {
+  symbol: string;
+  price: number;
+  timestamp: number;
+}

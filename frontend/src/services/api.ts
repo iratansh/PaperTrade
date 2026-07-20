@@ -9,6 +9,9 @@ import type {
   HistoryRange,
   AuthResponse,
   SnapshotPoint,
+  WatchlistItem,
+  AppNotification,
+  TransactionRecord,
 } from '../types';
 
 // --- Token storage -------------------------------------------------------
@@ -133,6 +136,41 @@ export const ordersApi = {
   cancelOrder: async (orderId: string): Promise<Order> => {
     const { data } = await api.delete(`/orders/${orderId}`);
     return data;
+  },
+};
+
+export const transactionsApi = {
+  list: async (): Promise<TransactionRecord[]> => {
+    const { data } = await api.get('/transactions');
+    return data;
+  },
+};
+
+export const watchlistApi = {
+  list: async (): Promise<WatchlistItem[]> => {
+    const { data } = await api.get('/watchlist');
+    return data;
+  },
+  add: async (symbol: string, alertPrice?: number | null): Promise<WatchlistItem> => {
+    const { data } = await api.post('/watchlist', { symbol, alertPrice: alertPrice ?? null });
+    return data;
+  },
+  remove: async (symbol: string): Promise<void> => {
+    await api.delete(`/watchlist/${symbol}`);
+  },
+};
+
+export const notificationsApi = {
+  list: async (): Promise<AppNotification[]> => {
+    const { data } = await api.get('/notifications');
+    return data;
+  },
+  unreadCount: async (): Promise<number> => {
+    const { data } = await api.get('/notifications/unread-count');
+    return data.count;
+  },
+  markAllRead: async (): Promise<void> => {
+    await api.post('/notifications/read');
   },
 };
 
