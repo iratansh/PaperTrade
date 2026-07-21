@@ -1,6 +1,7 @@
 package com.papertrade.service;
 
 import com.papertrade.dto.SymbolMatch;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +29,7 @@ public class FinnhubMarketDataService implements MarketDataService {
 
     private final WebClient.Builder webClientBuilder;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
+    private final MeterRegistry meterRegistry;
 
     @Value("${finnhub.api-key}")
     private String apiKey;
@@ -49,15 +51,18 @@ public class FinnhubMarketDataService implements MarketDataService {
     public Mono<BigDecimal> getCurrentPrice(String symbol) {
         String cacheKey = CACHE_KEY_PREFIX + symbol;
 
-        // Try cache first
+        // Try cache first. Each hit avoids an upstream Finnhub call - the
+        // papertrade.marketdata.cache{result} counter quantifies the reduction.
         return redisTemplate.opsForValue().get(cacheKey)
             .flatMap(cachedPrice -> {
                 log.debug("Cache hit for {}: {}", symbol, cachedPrice);
+                meterRegistry.counter("papertrade.marketdata.cache", "result", "hit").increment();
                 return Mono.just(new BigDecimal(cachedPrice));
             })
             .switchIfEmpty(Mono.defer(() -> {
                 // Cache miss - fetch from Finnhub API
                 log.debug("Cache miss for {}, fetching from Finnhub", symbol);
+                meterRegistry.counter("papertrade.marketdata.cache", "result", "miss").increment();
                 return fetchPriceFromApi(symbol)
                     .flatMap(price -> cachePriceAndReturn(cacheKey, price));
             }));

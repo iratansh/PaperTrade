@@ -1,15 +1,19 @@
 # PaperTrade
 
-A Wealthsimple-inspired **paper-trading platform** — practice trading real US equities with $100,000 in play money, live prices, price alerts, and a portfolio that tracks its own growth over time.
+A Wealthsimple-inspired **paper-trading platform** -- practice trading real US equities with $100,000 in play money, live prices, price alerts, and a portfolio that tracks its own growth over time.
 
 Built as a fully reactive Java backend (Spring WebFlux) with a React + TypeScript frontend, and deployable to AWS via Terraform.
 
 ## Demo
 
-▶ **[Watch the demo](media/demo.mov)**
+▶ **[Watch demo 1](media/demo.mov)** · **[Watch demo 2](media/demo2.mov)**
 
 <video src="media/demo.mov" controls width="100%">
   Your browser can't play this embedded video — <a href="media/demo.mov">download / view it here</a>.
+</video>
+
+<video src="media/demo2.mov" controls width="100%">
+  Your browser can't play this embedded video — <a href="media/demo2.mov">download / view it here</a>.
 </video>
 
 ## Features
@@ -37,7 +41,7 @@ Built as a fully reactive Java backend (Spring WebFlux) with a React + TypeScrip
  (Flyway)                    WebSocket stream)   candles)          local = DB poller)
 ```
 
-Two market-data providers sit behind interfaces (Dependency Inversion): **Finnhub** for real-time quotes / search / streaming, **Twelve Data** for historical candles — each used for what its free tier does best.
+Two market-data providers sit behind interfaces (Dependency Inversion): **Finnhub** for real-time quotes / search / streaming, **Twelve Data** for historical candles.
 
 ### Domain model
 
@@ -53,14 +57,14 @@ User (1) ──→ (1) TradingAccount
 
 ## Tech stack
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Java 21, Spring Boot 3.2 **WebFlux** (reactive), Spring Security (reactive JWT) |
-| Data | PostgreSQL via **R2DBC**, **Flyway** migrations, **Redis** (reactive) cache |
-| Market data | Finnhub (REST + WebSocket), Twelve Data (REST) |
-| Async | AWS SQS order queue (profile-gated), scheduled workers |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Chart.js, Axios |
-| Infra | Docker, **Terraform** (ECS Fargate, RDS, ElastiCache, SQS, ALB, ECR), GitHub Actions |
+| Layer       | Technology                                                                                   |
+| ----------- | -------------------------------------------------------------------------------------------- |
+| Backend     | Java 21, Spring Boot 3.2**WebFlux** (reactive), Spring Security (reactive JWT)         |
+| Data        | PostgreSQL via**R2DBC**, **Flyway** migrations, **Redis** (reactive) cache |
+| Market data | Finnhub (REST + WebSocket), Twelve Data (REST)                                               |
+| Async       | AWS SQS order queue (profile-gated), scheduled workers                                       |
+| Frontend    | React 18, TypeScript, Vite, Tailwind CSS, Chart.js, Axios                                    |
+| Infra       | Docker,**Terraform** (ECS Fargate, RDS, ElastiCache, SQS, ALB, ECR), GitHub Actions    |
 
 ## Design highlights
 
@@ -96,29 +100,35 @@ PaperTrade/
 ## Getting started (local)
 
 ### Prerequisites
+
 - Java 21 (`brew install openjdk@21`)
 - Docker + Docker Compose
 - Node 20+
 - Free API keys: [Finnhub](https://finnhub.io/register) and [Twelve Data](https://twelvedata.com/pricing)
 
 ### 1. Start Postgres + Redis
+
 ```bash
 docker-compose up -d
 ```
+
 > Postgres is mapped to host port **5433** to avoid colliding with a local Postgres on 5432.
 
 ### 2. Configure secrets
+
 ```bash
 cd backend
 cp .env.example .env      # then set FINNHUB_API_KEY and TWELVE_DATA_API_KEY
 ```
 
 ### 3. Run the backend
+
 ```bash
 ./gradlew bootRun         # http://localhost:8080  (Flyway migrates the schema on startup)
 ```
 
 ### 4. Run the frontend
+
 ```bash
 cd ../frontend
 npm install
@@ -129,17 +139,17 @@ Open http://localhost:3000, **register an account**, and start trading.
 
 ## API reference
 
-| Area | Endpoint |
-|------|----------|
-| Auth | `POST /api/auth/register` · `POST /api/auth/login` · `POST /api/auth/refresh` |
-| Portfolio | `GET /api/portfolio` · `GET /api/portfolio/history` |
-| Orders | `POST /api/orders` · `GET /api/orders` · `DELETE /api/orders/{id}` |
-| Transactions | `GET /api/transactions` |
-| Market data | `GET /api/stocks/{symbol}/quote` · `/history?range=1D\|1W\|3M\|1Y\|YTD` · `/search?q=` |
-| Live prices | `GET /api/stream/prices?symbols=AAPL,GOOGL` (SSE) |
-| Watchlist | `GET /api/watchlist` · `POST /api/watchlist` · `DELETE /api/watchlist/{symbol}` |
-| Notifications | `GET /api/notifications` · `/unread-count` · `POST /api/notifications/read` |
-| Health | `GET /actuator/health` |
+| Area          | Endpoint                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------ |
+| Auth          | `POST /api/auth/register` · `POST /api/auth/login` · `POST /api/auth/refresh`      |
+| Portfolio     | `GET /api/portfolio` · `GET /api/portfolio/history`                                   |
+| Orders        | `POST /api/orders` · `GET /api/orders` · `DELETE /api/orders/{id}`                 |
+| Transactions  | `GET /api/transactions`                                                                  |
+| Market data   | `GET /api/stocks/{symbol}/quote` · `/history?range=1D\|1W\|3M\|1Y\|YTD` · `/search?q=` |
+| Live prices   | `GET /api/stream/prices?symbols=AAPL,GOOGL` (SSE)                                        |
+| Watchlist     | `GET /api/watchlist` · `POST /api/watchlist` · `DELETE /api/watchlist/{symbol}`    |
+| Notifications | `GET /api/notifications` · `/unread-count` · `POST /api/notifications/read`        |
+| Health        | `GET /actuator/health`                                                                   |
 
 Protected endpoints require `Authorization: Bearer <token>`; auth, market-data, and the SSE stream are public.
 

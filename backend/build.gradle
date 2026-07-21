@@ -51,6 +51,8 @@ dependencies {
 
     // Health checks / metrics for ECS + ALB probes
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Prometheus registry - exposes latency percentiles at /actuator/prometheus
+    implementation 'io.micrometer:micrometer-registry-prometheus'
 
     // Flyway DB migrations (run over JDBC at startup; app runs on R2DBC).
     // Boot 3.2 ships Flyway 9, which bundles Postgres support in flyway-core.

@@ -1,6 +1,7 @@
 package com.papertrade.service;
 
 import com.papertrade.domain.Position;
+import com.papertrade.domain.TradingAccount;
 import com.papertrade.dto.PortfolioResponse;
 import com.papertrade.dto.PortfolioResponse.PositionResponse;
 import com.papertrade.exception.AccountNotFoundException;
@@ -23,60 +24,76 @@ public class PortfolioService {
 
     private final AccountRepository accountRepository;
     private final PositionRepository positionRepository;
+    private final MarketDataService marketDataService;
 
     /**
      * Get complete portfolio summary for a user
      *
      * Includes:
      * - Cash balance
-     * - All positions with P&L
+     * - All positions with P&L (valued at the CURRENT market price)
      * - Total portfolio value
      * - Aggregate P&L
      */
     public Mono<PortfolioResponse> getPortfolio(UUID userId) {
         return accountRepository.findByUserId(userId)
             .switchIfEmpty(Mono.error(new AccountNotFoundException("Account not found for user: " + userId)))
-            .flatMap(account -> {
-                // Get all positions for this account
-                return positionRepository.findByAccountId(account.getAccountId())
+            .flatMap(account ->
+                // Refresh each position's price before valuing it. position.currentPrice
+                // is only written at buy time, so without this the whole portfolio would
+                // be stuck at cost basis. getCurrentPrice is Redis-cached, so this is cheap.
+                positionRepository.findByAccountId(account.getAccountId())
+                    .flatMapSequential(this::withCurrentPrice)
                     .collectList()
-                    .map(positions -> {
-                        // Convert positions to DTOs
-                        List<PositionResponse> positionResponses = positions.stream()
-                            .map(this::toPositionResponse)
-                            .toList();
+                    .map(positions -> buildResponse(account, positions)));
+    }
 
-                        // Calculate totals
-                        BigDecimal totalPositionValue = positions.stream()
-                            .map(Position::getCurrentValue)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    /**
+     * Overlay the latest market price onto a position (keeping its last known
+     * price if the quote lookup fails).
+     */
+    private Mono<Position> withCurrentPrice(Position position) {
+        return marketDataService.getCurrentPrice(position.getSymbol())
+            .map(price -> {
+                position.setCurrentPrice(price);
+                return position;
+            })
+            .onErrorReturn(position);
+    }
 
-                        BigDecimal totalGainLoss = positions.stream()
-                            .map(Position::getUnrealizedPnL)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    private PortfolioResponse buildResponse(TradingAccount account, List<Position> positions) {
+        List<PositionResponse> positionResponses = positions.stream()
+            .map(this::toPositionResponse)
+            .toList();
 
-                        BigDecimal totalPortfolioValue = account.getBalance().add(totalPositionValue);
+        BigDecimal totalPositionValue = positions.stream()
+            .map(Position::getCurrentValue)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                        // Calculate total gain/loss percentage
-                        BigDecimal totalCostBasis = account.getInitialBalance().subtract(account.getBalance());
-                        BigDecimal totalGainLossPercentage = BigDecimal.ZERO;
-                        if (totalCostBasis.compareTo(BigDecimal.ZERO) > 0) {
-                            totalGainLossPercentage = totalGainLoss
-                                .divide(totalCostBasis, 4, RoundingMode.HALF_UP)
-                                .multiply(new BigDecimal("100"))
-                                .setScale(2, RoundingMode.HALF_UP);
-                        }
+        BigDecimal totalGainLoss = positions.stream()
+            .map(Position::getUnrealizedPnL)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                        return PortfolioResponse.builder()
-                            .cashBalance(account.getBalance())
-                            .totalPositionValue(totalPositionValue)
-                            .totalPortfolioValue(totalPortfolioValue)
-                            .totalGainLoss(totalGainLoss)
-                            .totalGainLossPercentage(totalGainLossPercentage)
-                            .positions(positionResponses)
-                            .build();
-                    });
-            });
+        BigDecimal totalPortfolioValue = account.getBalance().add(totalPositionValue);
+
+        // Gain/loss % is measured against the amount actually invested (cost basis)
+        BigDecimal totalCostBasis = account.getInitialBalance().subtract(account.getBalance());
+        BigDecimal totalGainLossPercentage = BigDecimal.ZERO;
+        if (totalCostBasis.compareTo(BigDecimal.ZERO) > 0) {
+            totalGainLossPercentage = totalGainLoss
+                .divide(totalCostBasis, 4, RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100"))
+                .setScale(2, RoundingMode.HALF_UP);
+        }
+
+        return PortfolioResponse.builder()
+            .cashBalance(account.getBalance())
+            .totalPositionValue(totalPositionValue)
+            .totalPortfolioValue(totalPortfolioValue)
+            .totalGainLoss(totalGainLoss)
+            .totalGainLossPercentage(totalGainLossPercentage)
+            .positions(positionResponses)
+            .build();
     }
 
     /**

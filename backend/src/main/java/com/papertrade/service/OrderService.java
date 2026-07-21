@@ -18,6 +18,7 @@ import com.papertrade.repository.AccountRepository;
 import com.papertrade.repository.OrderRepository;
 import com.papertrade.repository.PositionRepository;
 import com.papertrade.repository.TransactionRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Timed;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -43,6 +45,7 @@ public class OrderService {
     private final MarketHoursService marketHoursService;
     private final OrderQueue orderQueue;
     private final TransactionalOperator txOperator;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Place a new order (buy or sell)
@@ -93,8 +96,7 @@ public class OrderService {
             .flatMap(price -> {
                 boolean executable = order.getType() == OrderType.MARKET || order.canExecuteAtPrice(price);
                 if (executable) {
-                    return executeExistingOrder(order, price)
-                        .as(txOperator::transactional)
+                    return executeInTransaction(order, price)
                         .map(this::toOrderResponse);
                 }
                 log.info("Limit condition not met - queuing {} order for {}",
@@ -128,7 +130,7 @@ public class OrderService {
                     if (!executable) {
                         return Mono.empty(); // stays PENDING; re-driven later
                     }
-                    return executeExistingOrder(order, price).as(txOperator::transactional);
+                    return executeInTransaction(order, price);
                 }))
             .onErrorResume(error -> {
                 log.error("Failed to process order {}: {}", orderId, error.getMessage());
@@ -147,6 +149,20 @@ public class OrderService {
             .flatMap(account -> order.getSide() == OrderSide.BUY
                 ? executeBuyOrder(order, account, currentPrice)
                 : executeSellOrder(order, account, currentPrice));
+    }
+
+    /**
+     * Run an order's execution inside the pessimistic-locked transaction, and
+     * time the DB commit path (the external price fetch already happened, so
+     * this measures the lock + validate + write + commit work only).
+     * Exposed as the {@code papertrade.order.commit} Micrometer timer.
+     */
+    private Mono<Order> executeInTransaction(Order order, BigDecimal price) {
+        return executeExistingOrder(order, price)
+            .as(txOperator::transactional)
+            .timed()
+            .doOnNext(timed -> meterRegistry.timer("papertrade.order.commit").record(timed.elapsed()))
+            .map(Timed::get);
     }
 
     /**

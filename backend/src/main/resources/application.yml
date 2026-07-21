@@ -34,17 +34,26 @@ spring:
 server:
   port: 8080
 
-# Actuator (health probes for ECS / ALB target groups)
+# Actuator (health probes for ECS / ALB target groups + metrics for benchmarking)
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       probes:
         enabled: true
       show-details: never
+  metrics:
+    distribution:
+      # Publish latency percentiles + a histogram for the order commit path and HTTP requests
+      percentiles-histogram:
+        http.server.requests: true
+        papertrade.order.commit: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+        papertrade.order.commit: 0.5, 0.95, 0.99
 
 # JWT Configuration
 jwt:
@@ -64,6 +73,9 @@ twelvedata:
 # Trading Configuration
 trading:
   initial-balance: 100000.00
+  # Force the market "open" regardless of clock/weekday. Off by default; set
+  # FORCE_MARKET_OPEN=true to let orders fill immediately (e.g. for benchmarking).
+  force-open: ${FORCE_MARKET_OPEN:false}
   market-hours:
     open: "09:30"
     close: "16:00"
